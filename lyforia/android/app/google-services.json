@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "267510694111",
+    "project_id": "mindful-steps-axdii",
+    "storage_bucket": "mindful-steps-axdii.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:267510694111:android:56acabac6e71cdc85aa96a",
+        "android_client_info": {
+          "package_name": "com.example.lyforia"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "267510694111-02ss0u3522uuoqu13n96a01p4dnp06o7.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC_OW5Fch3gACLrUxqwbXnrbWTACcAvYqg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "267510694111-02ss0u3522uuoqu13n96a01p4dnp06o7.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
