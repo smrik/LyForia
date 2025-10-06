@@ -1,9 +1,5 @@
 plugins {
-  // ...
-
-  // Add the dependency for the Google services Gradle plugin
-  id("com.google.gms.google-services") version "4.4.3" apply false
-
+  // versions are managed in settings.gradle.kts via pluginManagement
 }
 
 allprojects {
@@ -26,4 +22,11 @@ subprojects {
 
 tasks.register<Delete>("clean") {
     delete(rootProject.layout.buildDirectory)
+}
+
+// Silence javac "options" warnings coming from some plugin modules using old defaults.
+subprojects {
+    tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
+        options.compilerArgs.add("-Xlint:-options")
+    }
 }

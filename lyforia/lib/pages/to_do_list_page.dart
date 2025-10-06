@@ -1,7 +1,12 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_ringtone_player/flutter_ringtone_player.dart';
+import 'package:lyforia/utils/firebase_refs.dart';
+import 'package:lyforia/utils/app_constants.dart';
+import 'package:lyforia/utils/error_handler.dart';
+import 'package:lyforia/widgets/common_widgets.dart';
 
 class ToDoListPage extends StatefulWidget {
   const ToDoListPage({super.key});
@@ -10,29 +15,50 @@ class ToDoListPage extends StatefulWidget {
   State<ToDoListPage> createState() => _ToDoListPageState();
 }
 
-class _ToDoListPageState extends State<ToDoListPage> {
+class _ToDoListPageState extends State<ToDoListPage> with ErrorHandlerMixin {
   final _taskController = TextEditingController();
-  final List<Map<String, dynamic>> _tasks = [];
 
-  void _addTask() {
-    if (_taskController.text.isNotEmpty) {
-      setState(() {
-        _tasks.add({'text': _taskController.text, 'done': false});
-        _taskController.clear();
+  Future<void> _addTask() async {
+    final text = _taskController.text.trim();
+    if (text.isEmpty) return;
+    final uid = Fb.auth.currentUser?.uid;
+    if (uid == null) {
+      if (!mounted) return;
+      showError(AppStrings.signInRequired);
+      return;
+    }
+    try {
+      await Fb.firestore.collection('tasks').add({
+        'text': text,
+        'done': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'uid': uid,
       });
+      _taskController.clear();
+    } catch (e) {
+      if (!mounted) return;
+      showError('Failed to add task: ${ErrorHandler.formatErrorMessage(e)}');
     }
   }
 
-  void _toggleDone(int index) {
-    setState(() {
-      _tasks[index]['done'] = !_tasks[index]['done'];
-    });
+  Future<void> _toggleDone(DocumentSnapshot doc) async {
+    final data = doc.data() as Map<String, dynamic>?;
+    final done = (data?['done'] as bool?) ?? false;
+    try {
+      await doc.reference.update({'done': !done});
+    } catch (e) {
+      if (!mounted) return;
+      showError('Failed to update task: ${ErrorHandler.formatErrorMessage(e)}');
+    }
   }
 
-  void _deleteTask(int index) {
-    setState(() {
-      _tasks.removeAt(index);
-    });
+  Future<void> _deleteTask(DocumentSnapshot doc) async {
+    try {
+      await doc.reference.delete();
+    } catch (e) {
+      if (!mounted) return;
+      showError('Failed to delete task: ${ErrorHandler.formatErrorMessage(e)}');
+    }
   }
 
   @override
@@ -47,15 +73,12 @@ class _ToDoListPageState extends State<ToDoListPage> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: AppPageWrapper(
         child: Column(
           children: [
             _buildTaskInput(),
-            const SizedBox(height: 20),
-            Expanded(
-              child: _buildTaskList(),
-            ),
+            SizedBox(height: AppSpacing.xl),
+            Expanded(child: _buildTaskList()),
           ],
         ),
       ),
@@ -70,11 +93,10 @@ class _ToDoListPageState extends State<ToDoListPage> {
             controller: _taskController,
             decoration: const InputDecoration(
               labelText: 'New Task',
-              border: OutlineInputBorder(),
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        SizedBox(width: AppSpacing.md),
         ElevatedButton(
           onPressed: _addTask,
           child: const Text('Add Task'),
@@ -84,25 +106,73 @@ class _ToDoListPageState extends State<ToDoListPage> {
   }
 
   Widget _buildTaskList() {
-    return ListView.builder(
-      itemCount: _tasks.length,
-      itemBuilder: (context, index) {
-        final task = _tasks[index];
-        return ListTile(
-          leading: Checkbox(
-            value: task['done'],
-            onChanged: (value) => _toggleDone(index),
-          ),
-          title: Text(
-            task['text'],
-            style: TextStyle(
-              decoration: task['done'] ? TextDecoration.lineThrough : TextDecoration.none,
-            ),
-          ),
-          trailing: IconButton(
-            icon: const Icon(Icons.delete),
-            onPressed: () => _deleteTask(index),
-          ),
+    final uid = Fb.auth.currentUser?.uid;
+    if (uid == null) {
+      return const Center(
+        child: Text('Sign in to view your tasks.'),
+      );
+    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: Fb.firestore
+          .collection('tasks')
+          .where('uid', isEqualTo: uid)
+          .orderBy('createdAt', descending: true)
+          .limit(200)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const Center(child: Text('Error loading tasks'));
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: AppLoadingIndicator());
+        }
+        final docs = snapshot.data!.docs;
+        if (docs.isEmpty) {
+          return AppEmptyState(
+            icon: Icons.task_outlined,
+            title: 'No tasks yet',
+            subtitle: 'Add your first task above to get started.',
+          );
+        }
+        return ListView.separated(
+          itemCount: docs.length,
+          separatorBuilder: (_, __) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>?;
+            final text = (data?['text'] as String?) ?? '';
+            final done = (data?['done'] as bool?) ?? false;
+            return Dismissible(
+              key: ValueKey(doc.id),
+              direction: DismissDirection.endToStart,
+              background: Container(
+                color:
+                    Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Icon(Icons.delete,
+                    color: Theme.of(context).colorScheme.error),
+              ),
+              onDismissed: (_) => _deleteTask(doc),
+              child: ListTile(
+                leading: Checkbox(
+                  value: done,
+                  onChanged: (_) => _toggleDone(doc),
+                ),
+                title: Text(
+                  text,
+                  style: TextStyle(
+                    decoration:
+                        done ? TextDecoration.lineThrough : TextDecoration.none,
+                  ),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _deleteTask(doc),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -235,12 +305,17 @@ class _TimerDialogState extends State<TimerDialog> {
           CircularProgressIndicator(
             value: progress,
             strokeWidth: 10,
-            backgroundColor: Colors.grey[300],
+            backgroundColor:
+                Theme.of(context).colorScheme.surfaceContainerHighest,
+            color: Theme.of(context).colorScheme.primary,
           ),
           Center(
             child: Text(
-              '${(_timeLeft ~/ 60).toString().padLeft(2, '0')}:${(_timeLeft % 60).toString().padLeft(2, '0')}',
-              style: const TextStyle(fontSize: 40, fontWeight: FontWeight.bold),
+              "${(_timeLeft ~/ 60).toString().padLeft(2, '0')}:${(_timeLeft % 60).toString().padLeft(2, '0')}",
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
           ),
         ],

@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "267510694111-a6veblc2sovonvmfsk34frrn9h5eto93.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.lyforia",
+            "certificate_hash": "ca2e833fb052d2e9ef0be55d053e95b2db2e6c93"
+          }
+        },
+        {
           "client_id": "267510694111-02ss0u3522uuoqu13n96a01p4dnp06o7.apps.googleusercontent.com",
           "client_type": 3
         }

@@ -1,7 +1,8 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:lyforia/utils/firebase_refs.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:lyforia/widgets/quick_log_card.dart';
 
 class BingeEatingLogPage extends StatefulWidget {
   const BingeEatingLogPage({super.key});
@@ -43,22 +44,32 @@ class BingeEntry {
       'food': food,
       'comments': comments,
       'date': Timestamp.fromDate(date),
+      'dateTime': Timestamp.fromDate(
+        DateTime(date.year, date.month, date.day, time.hour, time.minute),
+      ),
+      // Prefer server time to avoid client clock skew
+      'createdAt': FieldValue.serverTimestamp(),
     };
   }
 
   factory BingeEntry.fromFirestore(DocumentSnapshot doc) {
-    Map data = doc.data() as Map<String, dynamic>;
-    final timeParts = data['time'].split(':');
+    final data = doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
+    final timeStr = (data['time'] as String?) ?? '0:0';
+    final parts = timeStr.split(':');
+    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 0 : 0;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    final ts = data['date'] as Timestamp?;
+    final date = ts?.toDate() ?? DateTime.now();
     return BingeEntry(
       id: doc.id,
-      time: TimeOfDay(hour: int.parse(timeParts[0]), minute: int.parse(timeParts[1])),
-      place: data['place'] ?? '',
-      v: data['v'] ?? false,
-      l: data['l'] ?? false,
-      starred: data['starred'] ?? false,
-      food: data['food'] ?? '',
-      comments: data['comments'] ?? '',
-      date: (data['date'] as Timestamp).toDate(),
+      time: TimeOfDay(hour: hour, minute: minute),
+      place: (data['place'] as String?) ?? '',
+      v: (data['v'] as bool?) ?? false,
+      l: (data['l'] as bool?) ?? false,
+      starred: (data['starred'] as bool?) ?? false,
+      food: (data['food'] as String?) ?? '',
+      comments: (data['comments'] as String?) ?? '',
+      date: date,
     );
   }
 }
@@ -73,34 +84,110 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
   final _foodController = TextEditingController();
   final _commentsController = TextEditingController();
   final _weightController = TextEditingController();
-  bool _showCalendar = false;
+  bool _showCalendar = true;
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay;
   CalendarFormat _calendarFormat = CalendarFormat.month;
   Map<DateTime, double> _weights = {};
 
-  final CollectionReference _bingeCollection = FirebaseFirestore.instance.collection('binge_entries');
+  final CollectionReference _bingeCollection =
+      Fb.firestore.collection('binge_entries');
 
-  void _addEntry() {
-    if (_formKey.currentState!.validate() && _time != null) {
-      _bingeCollection.add(BingeEntry(
+  /// Handle quick-log submission (time + place only)
+  Future<void> _handleQuickLog(DateTime selectedTime, String place) async {
+    final uid = Fb.auth.currentUser?.uid;
+    if (uid == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please sign in to add entries.')));
+      return;
+    }
+
+    try {
+      final data = BingeEntry(
         id: '', // Firestore will generate an ID
-        time: _time!,
-        place: _placeController.text,
-        v: _vChecked,
-        l: _lChecked,
-        starred: _starredChecked,
-        food: _foodController.text,
-        comments: _commentsController.text,
+        time: TimeOfDay.fromDateTime(selectedTime),
+        place: place,
+        v: false, // Quick-log defaults
+        l: false,
+        starred: false,
+        food: '', // Empty in quick-log
+        comments: '',
         date: _selectedDay ?? DateTime.now(),
-      ).toJson());
-      _formKey.currentState!.reset();
-      setState(() {
-        _time = null;
-        _vChecked = false;
-        _lChecked = false;
-        _starredChecked = false;
-      });
+      ).toJson();
+      data['uid'] = uid;
+      data['source'] = 'quick_log'; // Track origin for analytics
+
+      await _bingeCollection.add(data);
+
+      if (!mounted) return;
+
+      // Show success SnackBar with "Add details?" option
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('✅ Entry saved. Want to add details?'),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Yes',
+            onPressed: () {
+              // Pre-fill the full form with time and place
+              setState(() {
+                _time = TimeOfDay.fromDateTime(selectedTime);
+                _placeController.text = place;
+              });
+              // Scroll to full form (user will see pre-filled fields)
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to save entry: $e')),
+      );
+    }
+  }
+
+  Future<void> _addEntry() async {
+    if (_formKey.currentState!.validate() && _time != null) {
+      final uid = Fb.auth.currentUser?.uid;
+      if (uid == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please sign in to add entries.')));
+        return;
+      }
+      try {
+        final data = BingeEntry(
+          id: '', // Firestore will generate an ID
+          time: _time!,
+          place: _placeController.text,
+          v: _vChecked,
+          l: _lChecked,
+          starred: _starredChecked,
+          food: _foodController.text,
+          comments: _commentsController.text,
+          date: _selectedDay ?? DateTime.now(),
+        ).toJson();
+        data['uid'] = uid;
+        data['source'] = 'full_form'; // Track origin for analytics
+        await _bingeCollection.add(data);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Entry saved')));
+        _formKey.currentState!.reset();
+        setState(() {
+          _time = null;
+          _vChecked = false;
+          _lChecked = false;
+          _starredChecked = false;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save entry: $e')),
+        );
+      }
     }
   }
 
@@ -109,7 +196,6 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Binge Eating Log'),
-        backgroundColor: Theme.of(context).primaryColor.withAlpha(25),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -117,7 +203,15 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
           key: _formKey,
           child: ListView(
             children: [
-              const Text('Track your eating habits.', style: TextStyle(fontSize: 16)),
+              // Quick-log card at top
+              QuickLogCard(
+                onSubmit: _handleQuickLog,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Or use the full form below:',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
               const SizedBox(height: 20),
               _buildTimePicker(),
               const SizedBox(height: 10),
@@ -127,7 +221,8 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
               const SizedBox(height: 10),
               _buildTextField(_foodController, 'Food and drink consumed'),
               const SizedBox(height: 10),
-              _buildTextField(_commentsController, 'Context and comments', maxLines: 3),
+              _buildTextField(_commentsController, 'Context and comments',
+                  maxLines: 3),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _addEntry,
@@ -148,7 +243,10 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
                 if (_selectedDay != null) ...[
                   Text(
                     'Entries for ${_selectedDay!.day}/${_selectedDay!.month}/${_selectedDay!.year}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 10),
                   _buildEntriesForSelectedDay(),
@@ -163,7 +261,13 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
                 child: const Text('View All Past Entries'),
               ),
               const SizedBox(height: 20),
-              const Text('Weekly Starred Entries (this month)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(
+                'Weekly Starred Entries (this month)',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
               _buildWeeklySummary(),
             ],
           ),
@@ -175,7 +279,8 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
   Widget _buildTimePicker() {
     return InkWell(
       onTap: () async {
-        final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+        final time = await showTimePicker(
+            context: context, initialTime: TimeOfDay.now());
         if (time != null) {
           setState(() {
             _time = time;
@@ -191,7 +296,8 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, {bool isRequired = false, int maxLines = 1}) {
+  Widget _buildTextField(TextEditingController controller, String label,
+      {bool isRequired = false, int maxLines = 1}) {
     return TextFormField(
       controller: controller,
       decoration: InputDecoration(
@@ -210,14 +316,32 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
   Widget _buildCheckboxes() {
     return Row(
       children: [
-        Checkbox(value: _vChecked, onChanged: (value) => setState(() => _vChecked = value!)),
-        const Text('V'),
+        Tooltip(
+          message: 'Vomited',
+          child: Checkbox(
+            value: _vChecked,
+            onChanged: (value) => setState(() => _vChecked = value!),
+          ),
+        ),
+        const Text('V', semanticsLabel: 'Vomited'),
         const SizedBox(width: 20),
-        Checkbox(value: _lChecked, onChanged: (value) => setState(() => _lChecked = value!)),
-        const Text('L'),
+        Tooltip(
+          message: 'Laxatives',
+          child: Checkbox(
+            value: _lChecked,
+            onChanged: (value) => setState(() => _lChecked = value!),
+          ),
+        ),
+        const Text('L', semanticsLabel: 'Laxatives'),
         const SizedBox(width: 20),
-        Checkbox(value: _starredChecked, onChanged: (value) => setState(() => _starredChecked = value!)),
-        const Text('*'),
+        Tooltip(
+          message: 'Starred / notable event',
+          child: Checkbox(
+            value: _starredChecked,
+            onChanged: (value) => setState(() => _starredChecked = value!),
+          ),
+        ),
+        const Text('*', semanticsLabel: 'Starred event'),
       ],
     );
   }
@@ -255,7 +379,10 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
               bottom: 1,
               child: Text(
                 _weights[DateTime(date.year, date.month, date.day)].toString(),
-                style: const TextStyle(fontSize: 10, color: Colors.red),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Theme.of(context).colorScheme.error,
+                ),
               ),
             );
           }
@@ -276,8 +403,8 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
           onPressed: () {
             if (_selectedDay != null && _weightController.text.isNotEmpty) {
               setState(() {
-                _weights[DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day)] =
-                    double.parse(_weightController.text);
+                _weights[DateTime(_selectedDay!.year, _selectedDay!.month,
+                    _selectedDay!.day)] = double.parse(_weightController.text);
                 _weightController.clear();
               });
             }
@@ -307,32 +434,59 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
   }
 
   Widget _buildEntriesForSelectedDay() {
+    final uid = Fb.auth.currentUser?.uid;
+    if (uid == null) {
+      return const Text('Sign in to view entries for the selected day.');
+    }
+    final start =
+        DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day);
+    final end = start.add(const Duration(days: 1));
     return StreamBuilder<QuerySnapshot>(
-      stream: _bingeCollection.where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(_selectedDay!)).where('date', isLessThan: Timestamp.fromDate(_selectedDay!.add(const Duration(days: 1)))).snapshots(),
+      stream: _bingeCollection
+          .where('uid', isEqualTo: uid)
+          .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+          .where('date', isLessThan: Timestamp.fromDate(end))
+          .orderBy('date', descending: false)
+          .limit(200)
+          .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return const Text('Something went wrong');
         }
 
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const CircularProgressIndicator();
+          return const Center(child: CircularProgressIndicator());
         }
 
-        final entries = snapshot.data!.docs.map((doc) => BingeEntry.fromFirestore(doc)).toList();
+        final entries = snapshot.data!.docs
+            .map((doc) => BingeEntry.fromFirestore(doc))
+            .toList();
 
         if (entries.isEmpty) {
           return const Text('No entries for this day.');
         }
 
+        final theme = Theme.of(context);
         return Column(
-          children: entries.map((entry) => ListTile(
-            title: Text('${entry.time.format(context)} - ${entry.food}'),
-            subtitle: Text(entry.place),
-            trailing: IconButton(
-              icon: const Icon(Icons.info_outline),
-              onPressed: () => _showEntryDetails(context, entry),
-            ),
-          )).toList(),
+          children: entries
+              .map(
+                (entry) => Card(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  child: ListTile(
+                    title: Text(
+                      '${entry.time.format(context)} - ${entry.food}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    subtitle: Text(entry.place),
+                    trailing: IconButton(
+                      icon: Icon(Icons.info_outline,
+                          color: theme.colorScheme.primary),
+                      onPressed: () => _showEntryDetails(context, entry),
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
         );
       },
     );
@@ -340,29 +494,52 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
 
   void _showEntries(BuildContext context) {
     Navigator.of(context).push(MaterialPageRoute(builder: (context) {
+      final uid = Fb.auth.currentUser?.uid;
+      if (uid == null) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Past Entries')),
+          body: const Center(child: Text('Sign in to view your past entries.')),
+        );
+      }
       return Scaffold(
         appBar: AppBar(title: const Text('Past Entries')),
         body: StreamBuilder<QuerySnapshot>(
-          stream: _bingeCollection.orderBy('date', descending: true).snapshots(),
+          stream: _bingeCollection
+              .where('uid', isEqualTo: uid)
+              .orderBy('date', descending: true)
+              .limit(500)
+              .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return const Text('Something went wrong');
             }
 
             if (snapshot.connectionState == ConnectionState.waiting) {
-              return const CircularProgressIndicator();
+              return const Center(child: CircularProgressIndicator());
             }
 
-            final entries = snapshot.data!.docs.map((doc) => BingeEntry.fromFirestore(doc)).toList();
+            final entries = snapshot.data!.docs
+                .map((doc) => BingeEntry.fromFirestore(doc))
+                .toList();
+            final theme = Theme.of(context);
 
             return ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
               itemCount: entries.length,
               itemBuilder: (context, index) {
                 final entry = entries[index];
-                return ListTile(
-                  title: Text('${entry.date.day}/${entry.date.month}/${entry.date.year} at ${entry.time.format(context)}'),
-                  subtitle: Text(entry.food),
-                  onTap: () => _showEntryDetails(context, entry),
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  child: ListTile(
+                    title: Text(
+                      '${entry.date.day}/${entry.date.month}/${entry.date.year} at ${entry.time.format(context)}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                    subtitle: Text(entry.food),
+                    trailing: Icon(Icons.chevron_right,
+                        color: theme.colorScheme.primary),
+                    onTap: () => _showEntryDetails(context, entry),
+                  ),
                 );
               },
             );
@@ -377,7 +554,8 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('${entry.date.day}/${entry.date.month}/${entry.date.year} at ${entry.time.format(context)}'),
+          title: Text(
+              '${entry.date.day}/${entry.date.month}/${entry.date.year} at ${entry.time.format(context)}'),
           content: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -405,4 +583,3 @@ class _BingeEatingLogPageState extends State<BingeEatingLogPage> {
     );
   }
 }
-

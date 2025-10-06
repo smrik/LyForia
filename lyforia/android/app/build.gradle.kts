@@ -6,9 +6,8 @@ plugins {
 }
 
 dependencies {
-  // Import the Firebase BoM
-  implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
-
+  // Import the Firebase BoM (keeps Firebase libs in sync)
+  implementation(platform("com.google.firebase:firebase-bom:34.2.0"))
 
   // TODO: Add the dependencies for Firebase products you want to use
   // When using the BoM, don't specify versions in Firebase dependencies

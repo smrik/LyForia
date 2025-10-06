@@ -35,11 +35,16 @@ class _TaskSplitterPageState extends State<TaskSplitterPage> {
               controller: _mainTaskController,
               decoration: const InputDecoration(
                 labelText: 'Main Task',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 20),
-            const Text('Subtasks', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              'Subtasks',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
             ..._buildSubtaskList(),
             const SizedBox(height: 10),
             ElevatedButton(
@@ -79,7 +84,6 @@ class _TaskSplitterPageState extends State<TaskSplitterPage> {
                 },
                 decoration: InputDecoration(
                   labelText: 'Subtask ${index + 1}',
-                  border: const OutlineInputBorder(),
                 ),
               ),
             ),
