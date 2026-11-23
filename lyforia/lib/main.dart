@@ -138,19 +138,25 @@ class _MainPageState extends State<MainPage> {
         onTap: _onItemTapped,
         items: <BottomNavigationBarItem>[
           BottomNavigationBarItem(
-            icon: Icon(_selectedIndex == 0 ? Icons.favorite : Icons.favorite_border),
+            icon: Icon(
+                _selectedIndex == 0 ? Icons.favorite : Icons.favorite_border),
             label: 'Check-in',
           ),
           BottomNavigationBarItem(
-            icon: Icon(_selectedIndex == 1 ? Icons.fastfood : Icons.fastfood_outlined),
+            icon: Icon(
+                _selectedIndex == 1 ? Icons.fastfood : Icons.fastfood_outlined),
             label: 'Eating',
           ),
           BottomNavigationBarItem(
-            icon: Icon(_selectedIndex == 2 ? Icons.check_circle : Icons.check_circle_outline),
+            icon: Icon(_selectedIndex == 2
+                ? Icons.check_circle
+                : Icons.check_circle_outline),
             label: 'To-Do',
           ),
           BottomNavigationBarItem(
-            icon: Icon(_selectedIndex == 3 ? Icons.analytics : Icons.analytics_outlined),
+            icon: Icon(_selectedIndex == 3
+                ? Icons.analytics
+                : Icons.analytics_outlined),
             label: 'Analytics',
           ),
           BottomNavigationBarItem(
